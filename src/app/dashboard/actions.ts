@@ -44,7 +44,10 @@ export const newCardsFormAction = async (_: unknown, formData: FormData) => {
       throw Error("Database error: Cards limit reached in this public DB");
     }
 
-    await client.sql`INSERT INTO cards (name, anime, user_id) VALUES (${name}, ${anime}, ${id as string})`;
+    const dbData = await client.sql`SELECT id from users WHERE id=${id as string}`;
+    const user = dbData.rows[0];
+
+    await client.sql`INSERT INTO cards (name, anime, user_id) VALUES (${name}, ${anime}, ${user.id as string})`;
     client.release();
   } catch (err) {
     console.error(err);

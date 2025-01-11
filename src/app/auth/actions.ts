@@ -64,10 +64,7 @@ export const signUpAction = async (_: unknown, formData: FormData) => {
 
     const hashPassword = await argon2.hash(password);
 
-    const dbData =
-      await client.sql`INSERT INTO users (name, email, password, refresh_token, created_at, role_id) VALUES (${name}, ${email}, ${hashPassword}, NULL, ${new Date().toUTCString()}, ${ROLE.CUSTOMER})`;
-
-    const user = dbData.rows[0];
+    await client.sql`INSERT INTO users (name, email, password, refresh_token, created_at, role_id) VALUES (${name}, ${email}, ${hashPassword}, NULL, ${new Date().toUTCString()}, ${ROLE.CUSTOMER})`;
 
     const dbData2 = await client.sql<{
       id: string;
@@ -87,7 +84,7 @@ export const signUpAction = async (_: unknown, formData: FormData) => {
         LEFT JOIN roles r ON u.role_id = r.id
         LEFT JOIN roles_permissions rp ON r.id = rp.role_id
         LEFT JOIN permissions p ON rp.permission_id = p.id
-        WHERE email=${user.email}
+        WHERE email=${email}
         GROUP BY
             u.id, u.name, u.email, u.password, r.name;
       `;
@@ -228,7 +225,7 @@ export const signInAction = async (_: unknown, formData: FormData) => {
     console.error(error);
     return {
       success: false,
-      message: "Database error: Cannot create new user!",
+      message: "Database error: Cannot login to user!",
     };
   }
 

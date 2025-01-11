@@ -30,6 +30,7 @@ export default function UserCardsForm() {
             Character Name
           </label>
           <input
+            autoFocus
             type="text"
             name="name"
             id="name"
