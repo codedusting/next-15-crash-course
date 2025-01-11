@@ -21,6 +21,14 @@ export default function HomePage() {
           Login
         </Link>
       </div>
+
+      <Link
+        href={"https://github.com/codedusting/next-15-crash-course"}
+        target="_blank"
+        className="mt-8 rounded bg-black px-4 py-3 text-white"
+      >
+        Find GitHub Repo Here
+      </Link>
     </section>
   );
 }
