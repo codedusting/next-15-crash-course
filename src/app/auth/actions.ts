@@ -5,7 +5,11 @@ import argon2 from "argon2";
 import { db } from "@vercel/postgres";
 import { redirect } from "next/navigation";
 import { createSession, deleteSession } from "@/lib/sessions";
-import { LOGIN } from "@/constants/route";
+import { DASHBOARD, LOGIN } from "@/constants/route";
+import * as jose from "jose";
+import { secret, alg } from "@/constants/jwt";
+import { JWT_MAX_AGE_15_MINS, JWT_MAX_AGE_SEVEN_DAYS } from "@/constants/cookie";
+import { ROLE } from "@/constants/permissions";
 
 const signUpFormSchema = z
   .object({
@@ -50,21 +54,91 @@ export const signUpAction = async (_: unknown, formData: FormData) => {
   const { name, email, password } = validatedFields.data;
 
   try {
-    const hashPassword = await argon2.hash(password);
     const client = await db.connect();
-    await client.sql`INSERT INTO users (name, email, password) VALUES (${name}, ${email}, ${hashPassword})`;
+
+    const dbLimiter = await client.sql`SELECT COUNT(*) from users`;
+    const totalAllowedUsers = Number(dbLimiter.rows[0].count);
+    if (totalAllowedUsers > 10) {
+      throw Error("Database error: User limit reached in this public DB");
+    }
+
+    const hashPassword = await argon2.hash(password);
+
+    const dbData =
+      await client.sql`INSERT INTO users (name, email, password, refresh_token, created_at, role_id) VALUES (${name}, ${email}, ${hashPassword}, NULL, ${new Date().toUTCString()}, ${ROLE.CUSTOMER})`;
+
+    const user = dbData.rows[0];
+
+    const dbData2 = await client.sql<{
+      id: string;
+      name: string;
+      email: string;
+      rolename: string;
+      permissionsassignedtoeachrole: string;
+    }>`
+      SELECT
+            u.id AS id,
+            u.name AS name,
+            u.email AS email,
+            r.name AS rolename,
+            STRING_AGG(p.name, ', ') AS permissionsassignedtoeachrole
+        FROM
+            users u
+        LEFT JOIN roles r ON u.role_id = r.id
+        LEFT JOIN roles_permissions rp ON r.id = rp.role_id
+        LEFT JOIN permissions p ON rp.permission_id = p.id
+        WHERE email=${user.email}
+        GROUP BY
+            u.id, u.name, u.email, u.password, r.name;
+      `;
+
+    const user2 = dbData2.rows[0];
+
+    const {
+      id: userId,
+      name: username,
+      email: userEmail,
+      rolename,
+      permissionsassignedtoeachrole,
+    } = user2;
+
+    const accessToken = await new jose.SignJWT({
+      id: userId,
+      name: username,
+      email: userEmail,
+      rolename,
+      permissionsassignedtoeachrole,
+    })
+      .setProtectedHeader({ alg })
+      .setIssuedAt()
+      .setExpirationTime(JWT_MAX_AGE_15_MINS)
+      .sign(secret);
+
+    const refreshToken = await new jose.SignJWT({
+      id: userId,
+      name: username,
+      email: userEmail,
+    })
+      .setProtectedHeader({ alg })
+      .setIssuedAt()
+      .setExpirationTime(JWT_MAX_AGE_SEVEN_DAYS)
+      .sign(secret);
+
+    await client.sql`UPDATE users SET refresh_token=${refreshToken} where id=${userId}`;
+
     client.release();
     console.log("Registration success...");
-    await createSession({ name, email });
+    await createSession(accessToken, refreshToken);
   } catch (error) {
     console.error(error);
     return {
       success: false,
-      message: "Database error: Cannot create new user!",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      message: (error as any).message || "Database error: Cannot create new user!",
     };
   }
 
-  redirect("/dashboard");
+  redirect(DASHBOARD);
 };
 
 const signInFormSchema = z.object({
@@ -95,17 +169,57 @@ export const signInAction = async (_: unknown, formData: FormData) => {
   try {
     const client = await db.connect();
     const dbData = await client.sql<{
+      id: string;
       name: string;
       email: string;
       password: string;
-    }>`SELECT name, email, password FROM users WHERE email=${email}`;
+      rolename: string;
+      permissionsassignedtoeachrole: string;
+    }>`SELECT
+          u.id AS id,
+          u.name AS name,
+          u.email AS email,
+          u.password AS password,
+          r.name AS rolename,
+          STRING_AGG(p.name, ', ') AS permissionsassignedtoeachrole
+      FROM
+          users u
+      LEFT JOIN roles r ON u.role_id = r.id
+      LEFT JOIN roles_permissions rp ON r.id = rp.role_id
+      LEFT JOIN permissions p ON rp.permission_id = p.id
+      WHERE email=${email}
+      GROUP BY
+          u.id, u.name, u.email, u.password, r.name;
+      `;
 
     const user = dbData.rows[0];
 
     if (await argon2.verify(user.password, password)) {
+      const accessToken = await new jose.SignJWT({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        rolename: user.rolename,
+        permissionsassignedtoeachrole: user.permissionsassignedtoeachrole,
+      })
+        .setProtectedHeader({ alg })
+        .setIssuedAt()
+        .setExpirationTime(JWT_MAX_AGE_15_MINS)
+        .sign(secret);
+
+      const refreshToken = await new jose.SignJWT({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+      })
+        .setProtectedHeader({ alg })
+        .setIssuedAt()
+        .setExpirationTime(JWT_MAX_AGE_SEVEN_DAYS)
+        .sign(secret);
+
+      await client.sql`UPDATE users SET refresh_token=${refreshToken} WHERE email=${user.email}`;
       client.release();
-      console.log("Login success...");
-      await createSession({ name: user.name, email: user.email });
+      await createSession(accessToken, refreshToken);
     } else {
       client.release();
       throw Error("Login Failed");
@@ -118,7 +232,7 @@ export const signInAction = async (_: unknown, formData: FormData) => {
     };
   }
 
-  redirect("/dashboard");
+  redirect(DASHBOARD);
 };
 
 export const logout = async () => {

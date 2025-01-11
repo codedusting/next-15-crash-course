@@ -2,8 +2,10 @@ import Link from "next/link";
 
 export default function HomePage() {
   return (
-    <section className="flex h-dvh flex-col items-center justify-center">
-      <h1 className="text-5xl">Home Page: Public Route</h1>
+    <section aria-labelledby="heading" className="flex h-dvh flex-col items-center justify-center">
+      <h1 id="heading" className="text-5xl">
+        Home Page: Public Route
+      </h1>
 
       <div className="mt-6 flex items-center justify-center gap-x-2">
         <Link

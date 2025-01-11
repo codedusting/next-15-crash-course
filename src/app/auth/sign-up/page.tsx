@@ -1,5 +1,10 @@
 import Link from "next/link";
 import SignUpForm from "./form";
+import { type Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Register",
+};
 
 export default function SignUpPage() {
   return (
